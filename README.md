@@ -92,3 +92,89 @@ After training during 100 epochs we tested the model.
     
 We got pretty good results. However, due to memory limitations the model was trained
 only with short sentences (0-10 words).
+
+## Attention network.
+
+We improve teh seq2seq model by adding attention. In the Seq2seq model, the output of the encoder is also the hidden state of the last LSTM/GRU unit.
+For last sentences, this hidden state can't hold enough information for the decoder.
+
+In attention networks we use a weighted combination of the output of LTMS/GRU units in the encoder bidirectional layer.
+That means that for predicting the next word during the decoder phase we consider the whole input sentence.
+
+The weights are in turn calculated using a neural network.
+
+alpha_t' = Network([s_t-1, h_t']), t' = 1...Tx
+
+Where s_t-1 is the previous state of the decoder LSTM/GRU. h_t' is the t' output of the encoder bidirectional layer.
+alpha_t' is the weight that corresponds to the input word at time t.
+
+
+The accuracy improved in comparison with the basic seq2seq model.
+
+![Accuracy](accuracy_attention.png)
+
+The loss also got lower.
+
+![Loss](loss_attention.png)
+
+
+We can even create an attention matrix where it is possible to observe each word
+that the network was paying attention to when generating each output word.
+
+![matrix](attention_matrix.png)
+
+Let's test some translations from the same training dataset:
+
+    Continue? y/ny
+    Original: I'm a liar.
+    Translation: soy un mentiroso <eos>
+    Continue? y/ny
+    Original: I'm hungry.
+    Translation: me pica el bagre <eos>
+    Continue? y/ny
+    Original: That's not true.
+    Translation: no es verdad <eos>
+    Continue? y/ny
+    Original: That's a lot!
+    Translation: ¡es un montón! <eos>
+    Continue? y/ny
+    Original: He is old.
+    Translation: él es anciano <eos>
+
+At this point it is pausible to construct a chatbot. Instead
+of using original_sentence -> translation_sentence pairs
+would need input and output pairs from real conversations:
+
+I used a corpus consisting of twitter conversation and converted into 
+a format of input --> tab --> output lines. Then using a loop asking for
+new sentences we can simulate a chat.
+
+    Write a sentence ('n' to exit):hey mate
+    Original: hey mate
+    Translation: im sorry for im scared <eos>
+    Write a sentence ('n' to exit):when are you comming home?
+    Original: when are you comming home?
+    Translation: i'm trying, this shit though i'm done too year <eos>
+    Write a sentence ('n' to exit):why?
+    Original: why?
+    Translation: they feeeeeeeel iiiiiiiiittt <eos>
+    Write a sentence ('n' to exit):everything will be ok
+    Original: everything will be ok
+    Translation: what i'm true <eos>
+    
+The conversation we got has some sense, but mostly we got some random answers.
+That is because we are not entering sentences from the training set but from the 
+validation set. If we observe the training curve we will realize that the model
+overfitted and only learned to memorize.
+
+![acc_chatbot](acc_chatbot.png)
+
+
+To construct a chatbot is a hard task regarding generating a meaninful conversation chain.
+Some reasons for this is:
+a) For one sentence we could get multiple valid answers and we didn't include them in the training set. 
+b) Our model doesn't manage the previous state of the chat. That means that each time
+   we insert a new sentence we'll likely get an answer that doesn't follow the
+   previous conversation.
+
+!
