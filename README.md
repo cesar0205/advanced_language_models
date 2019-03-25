@@ -177,4 +177,166 @@ b) Our model doesn't manage the previous state of the chat. That means that each
    we insert a new sentence we'll likely get an answer that doesn't follow the
    previous conversation.
 
-!
+##Memory networks
+
+Memory networks is a relatively new architecture that tackles problems related to long term
+dependencies in sequential data. 
+
+In memory networks the input data consists of:
+a) A story.
+b) Each story is made up of several sentences. 
+c) Each sentence contains many words.
+d) A query that contains many words.
+e) An answer made up of one word.
+
+The objective is to input a story, input a query and retrieve an answer.
+
+In this study case we analyse two tasks:
+
+a) One supporting fact model to solve question answering based on one
+   sentences in the story that supports the answer.
+b) Two supporting facts model to solve question answering based on two
+   sentences in the story that supports the answer.
+
+In memory networks we feed the complete story into the network. First we divide
+the story in sentences. Each sentence contains words that we pass into an embedding layer.
+Next, we sum the embedded representations of the words in the sentence and create
+and "embedded sentence". We end up with T sentences in word vector format.
+
+    EMBEDDING_DIM = 15
+    input_facts = Input(shape=(MAX_STORY_LENGTH, MAX_FACT_LENGTH))
+    embeddings = Embedding(MAX_VOCABULARY, EMBEDDING_DIM)
+    sentences_op = embeddings(input_facts)
+    sentences_op = Lambda(lambda x: K.sum(x, axis = 2))(sentences_op)
+
+Next the network processes the query. As with the sentences, an embedding layer transformes its words 
+into word vectors with the same latent dimensionality as the embedded sentences.
+
+
+    input_question = Input(shape=(MAX_QUESTION_LENGTH, ))
+    embeddings_question = Embedding(MAX_VOCABULARY, EMBEDDING_DIM)
+    question_op = embeddings_question(input_question)
+    question_op = Lambda(lambda x: K.sum(x, axis = 1))(question_op)
+    question_op = Reshape((1, EMBEDDING_DIM))(question_op)
+    
+The network needs to compute the importance of each sentence to answer the query.
+To do so it calculates the dot product between the sentences and the query and return scores. This is
+trivial as ach sentence and the query have the same latent dimensionality.
+    
+    weights = Dot(axes = 2)([sentences_op, question_op])
+    weights = Reshape((MAX_STORY_LENGTH,))(weights) #We can use flatten as well but this way we can control the output dimension.
+    weights = Activation(activation = "softmax")(weights)
+    weights = Reshape((MAX_STORY_LENGTH, 1))(weights)
+
+The next step is to create a weighted sum of the story sentences using the scores computed
+previously. 
+
+    s_relevant = Dot(axes = 1)([sentences_op, weights])
+    s_relevant = Reshape((EMBEDDING_DIM, ))(s_relevant)
+
+The previous steps are ensembled into what is called a hop.
+
+In the case of the one supporting fact task we finish the model by adding to the hop a dense layer with
+a softmax activation function. The output size is equal to the vocabulary length and the network
+will pick the most probable word as the answer given the input sentences and the query.
+
+    output = Dense(MAX_VOCABULARY, activation = "softmax")(s_relevant)
+
+For the two supporting fact task the first hop will take care of choosing the first fact.
+Additionally we create another hop to handle the second supporting fact. The output of the first
+hop will serve as the embedded question for the second hop. Examining carefully we can notice
+that we are effectively communicating both hops using a recurrent conexion. We added then
+a recurrent element that we can utilize to create models with more than two supporting factors.
+
+Optionally, in order to optimize the two supporting factor model:
+1) Inside each hop we create two sentence embeddings instead of only one.
+   The first one will be used to calculate the sentence weights (scores) and the second
+   one will be used to multipy the weights by later.
+   
+       embeddings_story_1 , weights_1, output_1 = hop(embeddings_story, 
+                                                   embeddings_question, 
+                                                   dense_layer, 
+                                                   MAX_VOCABULARY, 
+                                                   EMBEDDING_DIM, 
+                                                   MAX_STORY_LENGTH)
+   
+2) Pass the second sencence embedding from the first hop to the second hop to create its
+   weights.
+   
+        embeddings_story_2 , weights_2, output_2 = hop(embeddings_story_1, 
+                                                   output_1,
+                                                   dense_layer, 
+                                                   MAX_VOCABULARY, 
+                                                   EMBEDDING_DIM, 
+                                                   MAX_STORY_LENGTH)
+   
+        output_softmax = Dense(MAX_VOCABULARY, activation = "softmax")(output_2)
+
+Results of the single supporting fact model/task:
+
+![Loss](loss_ssf.png)
+
+![Accuracy](acc_ssf.png)
+
+As we can see this task require only a few epochs to train and as it is not deep it was quite fast as well.
+
+We can even print the weights assigned to each sentence during the calculation of the dot product
+between the story and the query.
+
+    Question:  Where is Sandra ? Correct: kitchen Prediction: kitchen
+    Story: 
+    1 Mary journeyed to the bedroom . <P>			0.00
+    2 Sandra travelled to the kitchen . <P>			1.00
+    <P> <P> <P> <P> <P> <P> <P> <P>			        0.00
+    <P> <P> <P> <P> <P> <P> <P> <P>			        0.00
+    <P> <P> <P> <P> <P> <P> <P> <P>			        0.00
+    <P> <P> <P> <P> <P> <P> <P> <P>			        0.00
+    <P> <P> <P> <P> <P> <P> <P> <P>			        0.00
+    <P> <P> <P> <P> <P> <P> <P> <P>			        0.00
+    <P> <P> <P> <P> <P> <P> <P> <P>			        0.00
+    <P> <P> <P> <P> <P> <P> <P> <P>			        0.00
+    Continue y/nn
+
+The hop chooses the sentence 2 (Sandra travelled to the kitchen) to answer the question, where is Sandra? Answer: Kitchen.
+
+Results of the two supporting fact model/task:
+
+![Loss](loss_tsf.png)
+
+![Accuracy](acc_tsf.png)
+
+This task take more epochs to have a decent performance. It was slower to trein at each epoch as well.
+
+Again we can print the weights that each hop assigns to the story sentences.
+
+    Question:  Where is the apple ? Answer: office Prediction: office
+    Story: 
+    1 Sandra went back to the garden .			0.0000		0.0000
+    2 Mary journeyed to the kitchen . <P>			0.0000		0.0000
+    3 Sandra travelled to the office . <P>			0.0000		0.0000
+    4 John went back to the office .			0.0000		0.0000
+    5 Sandra went to the bathroom . <P>			0.0000		0.0000
+    6 Sandra went back to the garden .			0.0000		0.0000
+    7 Daniel went back to the office .			0.0000		0.0000
+    8 John moved to the hallway . <P>			0.0000		0.0000
+    9 Mary grabbed the milk there . <P>			0.0000		0.0000
+    10 Mary left the milk . <P> <P>			        0.0000		0.0000
+    12 Mary travelled to the garden . <P>			0.0000		0.0045
+    13 Sandra took the apple there . <P>			0.0011		0.0000
+    15 Sandra left the apple there . <P>			0.0202		0.0000
+    16 Mary got the football there . <P>			0.0000		0.0000
+    18 Mary grabbed the apple there . <P>			0.9787		0.0000
+    19 Mary discarded the football . <P> <P>		0.0000		0.0000
+    21 Sandra picked up the football there .		0.0000		0.0000
+    22 Mary travelled to the office . <P>			0.0000		0.9955
+    <P> <P> <P> <P> <P> <P> <P> <P>			        0.0000		0.0000
+    <P> <P> <P> <P> <P> <P> <P> <P>			        0.0000		0.0000
+    <P> <P> <P> <P> <P> <P> <P> <P>			        0.0000		0.0000
+    <P> <P> <P> <P> <P> <P> <P> <P>			        0.0000		0.0000
+    
+The first hop picks the sentence 18 and the second hop the sentence 22.
+
+18 Mary grabbed the apple there.
+22 Mary travelled to the office.
+
+These sentence are actually the two supporting facts to answer the question, where is the apple? Answer: Office
